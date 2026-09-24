@@ -15,6 +15,21 @@ export const AugmentedTileJSON = Type.Composite([
     }),
 ]);
 
+/**
+ * Server-side requests to the PMTiles service use PMTILES_INTERNAL_URL when set
+ * so the API can reach it on the container network while clients are handed
+ * the public PMTILES_URL
+ */
+function pmtilesInternalURL(url: URL): URL {
+    if (!process.env.PMTILES_INTERNAL_URL) return url;
+
+    const internal = new URL(process.env.PMTILES_INTERNAL_URL);
+    const rewritten = new URL(url);
+    rewritten.protocol = internal.protocol;
+    rewritten.host = internal.host;
+    return rewritten;
+}
+
 export function isEsriLayerURL(url: string): boolean {
     return !!(
         String(url).match(/\/FeatureServer\/\d+$/)
@@ -98,7 +113,7 @@ export async function basemapTileJSON(
         tilejsonUrl.pathname = decodeURIComponent(parsedUrl.pathname).replace(/\/tiles\/\{[^}]+\}.*$/, '');
         tilejsonUrl.searchParams.set('token', opts.upstreamToken);
 
-        const tj = await fetch(tilejsonUrl);
+        const tj = await fetch(pmtilesInternalURL(tilejsonUrl));
         if (!tj.ok) {
             throw new Err(400, null, 'Unable to fetch TileJSON from hosted basemap');
         }
@@ -137,7 +152,9 @@ export async function profileAssetTileJSON(
     const url = new URL(`${config.PMTILES_URL}/tiles/profile/${opts.owner}/${opts.asset}`);
     url.searchParams.append('token', token);
 
-    const tilejson = await safeFetch(url);
+    const tilejson = await safeFetch(pmtilesInternalURL(url), {
+        safeUrlAllow: process.env.PMTILES_INTERNAL_URL ? [process.env.PMTILES_INTERNAL_URL] : undefined,
+    });
     if (!tilejson.ok) {
         throw new Err(tilejson.status, null, `Failed to retrieve TileJSON: ${await tilejson.text()}`);
     }

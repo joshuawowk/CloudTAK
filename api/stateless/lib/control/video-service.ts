@@ -227,7 +227,7 @@ export default class VideoServiceControl {
         // Special case for supporting internal Docker Compose network
         let external = video.url;
         if (video.url && new URL(video.url).hostname === 'media') {
-            external = 'http://localhost';
+            external = process.env.MEDIA_EXTERNAL_URL || 'http://localhost';
         }
 
         return {

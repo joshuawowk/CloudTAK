@@ -9,7 +9,7 @@ services:
             - media
             - store
         ports:
-            - "5000:5000"
+            - "${CLOUDTAK_BIND:-0.0.0.0}:${CLOUDTAK_PORT:-5000}:5000"
         environment:
             - CLOUDTAK_Mode=${CLOUDTAK_Mode}
             - CLOUDTAK_Server_Mode=${CLOUDTAK_Server_Mode:-both}
@@ -19,11 +19,13 @@ services:
             - SigningSecret=${SigningSecret}
             - ASSET_BUCKET=${ASSET_BUCKET}
             - AWS_S3_Endpoint=${AWS_S3_Endpoint}
-            - AWS_S3_AccessKeyId=${AWS_S3_AccessKeyId}
-            - AWS_S3_SecretAccessKey=${AWS_S3_SecretAccessKey}
-            - POSTGRES=${POSTGRES}
+            - AWS_S3_AccessKeyId=${AWS_S3_AccessKeyId:-${MINIO_ROOT_USER}}
+            - AWS_S3_SecretAccessKey=${AWS_S3_SecretAccessKey:-${MINIO_ROOT_PASSWORD}}
+            - POSTGRES=${POSTGRES:-postgres://${POSTGRES_USER:-docker}:${POSTGRES_PASSWORD:-docker}@postgis:5432/${POSTGRES_DB:-gis}}
             - API_URL=${API_URL}
             - PMTILES_URL=${PMTILES_URL}
+            - PMTILES_INTERNAL_URL=${PMTILES_INTERNAL_URL:-}
+            - MEDIA_EXTERNAL_URL=${MEDIA_EXTERNAL_URL:-}
 
     tiles:
         build:
@@ -31,14 +33,15 @@ services:
           dockerfile: ./tasks/pmtiles/Dockerfile.compose
         restart: 'always'
         ports:
-            - "5002:5002"
+            - "${CLOUDTAK_BIND:-0.0.0.0}:${TILES_PORT:-5002}:5002"
         environment:
             - PMTILES_URL=${PMTILES_URL}
+            - API_URL=${API_URL_INTERNAL:-${API_URL}}
             - SigningSecret=${SigningSecret}
             - ASSET_BUCKET=${ASSET_BUCKET}
             - AWS_S3_Endpoint=${AWS_S3_Endpoint}
-            - AWS_S3_AccessKeyId=${AWS_S3_AccessKeyId}
-            - AWS_S3_SecretAccessKey=${AWS_S3_SecretAccessKey}
+            - AWS_S3_AccessKeyId=${AWS_S3_AccessKeyId:-${MINIO_ROOT_USER}}
+            - AWS_S3_SecretAccessKey=${AWS_S3_SecretAccessKey:-${MINIO_ROOT_PASSWORD}}
 
     events:
         build:
@@ -50,12 +53,12 @@ services:
             - store
         environment:
             - CLOUDTAK_Mode=${CLOUDTAK_Mode}
-            - API_URL=${API_URL}
+            - API_URL=${API_URL_INTERNAL:-${API_URL}}
             - SigningSecret=${SigningSecret}
             - ASSET_BUCKET=${ASSET_BUCKET}
             - AWS_S3_Endpoint=${AWS_S3_Endpoint}
-            - AWS_S3_AccessKeyId=${AWS_S3_AccessKeyId}
-            - AWS_S3_SecretAccessKey=${AWS_S3_SecretAccessKey}
+            - AWS_S3_AccessKeyId=${AWS_S3_AccessKeyId:-${MINIO_ROOT_USER}}
+            - AWS_S3_SecretAccessKey=${AWS_S3_SecretAccessKey:-${MINIO_ROOT_PASSWORD}}
 
     retention:
         build:
@@ -68,12 +71,12 @@ services:
             - store
         environment:
             CLOUDTAK_Mode: ${CLOUDTAK_Mode}
-            API_URL: ${API_URL}
+            API_URL: ${API_URL_INTERNAL:-${API_URL}}
             ASSET_BUCKET: ${ASSET_BUCKET}
             AWS_REGION: ${AWS_REGION:-us-east-1}
             AWS_S3_Endpoint: ${AWS_S3_Endpoint}
-            AWS_S3_AccessKeyId: ${AWS_S3_AccessKeyId}
-            AWS_S3_SecretAccessKey: ${AWS_S3_SecretAccessKey}
+            AWS_S3_AccessKeyId: ${AWS_S3_AccessKeyId:-${MINIO_ROOT_USER}}
+            AWS_S3_SecretAccessKey: ${AWS_S3_SecretAccessKey:-${MINIO_ROOT_PASSWORD}}
             SigningSecret: ${SigningSecret}
             RETENTION_SCHEDULE: ${RETENTION_SCHEDULE:-0 3 * * *}
 
@@ -81,38 +84,92 @@ services:
         image: ghcr.io/dfpc-coe/media-infra:v9.10.0
         restart: 'always'
         environment:
-            - API_URL=${API_URL}
+            - API_URL=${API_URL_INTERNAL:-${API_URL}}
             - SigningSecret=${SigningSecret}
             - MEDIAMTX_LOGLEVEL=${MEDIAMTX_LOGLEVEL:-info}
             - CLOUDTAK_Config_media_url=${CLOUDTAK_Config_media_url}
         ports:
-            - "${MEDIA_PORT_API:-9997}:9997"
-            - "${MEDIA_PORT_RTSP:-8554}:8554"
-            - "${MEDIA_PORT_RTMP:-1935}:1935"
-            - "${MEDIA_PORT_HLS:-8888}:8888"
-            - "${MEDIA_PORT_SRT:-8890}:8890"
+            - "${MEDIA_BIND:-0.0.0.0}:${MEDIA_PORT_API:-9997}:9997"
+            - "${MEDIA_BIND:-0.0.0.0}:${MEDIA_PORT_RTSP:-8554}:8554"
+            - "${MEDIA_BIND:-0.0.0.0}:${MEDIA_PORT_RTMP:-1935}:1935"
+            - "${MEDIA_BIND:-0.0.0.0}:${MEDIA_PORT_HLS:-8888}:8888"
+            - "${MEDIA_BIND:-0.0.0.0}:${MEDIA_PORT_SRT:-8890}:8890/udp"
 
     postgis:
         image: postgis/postgis:17-3.4-alpine
         restart: 'always'
         ports:
-            - 127.0.0.1:5433:5432
+            - 127.0.0.1:${POSTGRES_PORT:-5433}:5432
+        volumes:
+            - ${POSTGIS_VOLUME:-cloudtak-postgis}:/var/lib/postgresql/data
         environment:
-            - POSTGRES_DB=gis
-            - POSTGRES_USER=docker
-            - POSTGRES_PASSWORD=docker
+            - POSTGRES_DB=${POSTGRES_DB:-gis}
+            - POSTGRES_USER=${POSTGRES_USER:-docker}
+            - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-docker}
 
     store:
         image: quay.io/minio/minio:RELEASE.2024-08-17T01-24-54Z
         entrypoint: sh
-        command: -c 'mkdir -p /data/cloudtak && /usr/bin/minio server /data --console-address ":9002"'
+        command: -c 'mkdir -p /data/${ASSET_BUCKET:-cloudtak} && /usr/bin/minio server /data --console-address ":9002"'
         restart: 'always'
         volumes:
-            - .docker-store:/data
+            - ${STORE_VOLUME:-cloudtak-store}:/data
         ports:
-            - 127.0.0.1:9000:9000
-            - 127.0.0.1:9002:9002
+            - 127.0.0.1:${MINIO_PORT_API:-9000}:9000
+            - 127.0.0.1:${MINIO_PORT_CONSOLE:-9002}:9002
         environment:
             - MINIO_ROOT_USER=${MINIO_ROOT_USER}
             - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
             - MINIO_DEFAULT_BUCKETS=${ASSET_BUCKET}
+
+    # Tailscale sidecar: joins the tailnet as its own node (TS_HOSTNAME) and
+    # serves CloudTAK over HTTPS with a MagicDNS certificate:
+    #   443  -> api:5000    (Web UI + API + WebSockets)
+    #   8443 -> tiles:5002  (PMTiles, must match PMTILES_URL)
+    #   9997 -> media:9997  (Media API / HLS, port is fixed by CloudTAK)
+    #   8554 -> media:8554  (RTSP, TCP only)
+    #   1935 -> media:1935  (RTMP)
+    # SRT (UDP) cannot pass through tailscale serve
+    tailscale:
+        image: tailscale/tailscale:${TS_VERSION:-stable}
+        hostname: ${TS_HOSTNAME:-cloudtak}
+        restart: 'always'
+        depends_on:
+            - api
+            - tiles
+            - media
+        environment:
+            - TS_AUTHKEY=${TS_AUTHKEY}
+            - TS_HOSTNAME=${TS_HOSTNAME:-cloudtak}
+            - TS_STATE_DIR=/var/lib/tailscale
+            - TS_USERSPACE=true
+            - TS_SERVE_CONFIG=/tmp/serve.json
+            - TS_EXTRA_ARGS=${TS_EXTRA_ARGS:-}
+        volumes:
+            - tailscale-state:/var/lib/tailscale
+        entrypoint: sh
+        command:
+            - -c
+            - |
+              cat > /tmp/serve.json <<'EOF'
+              {
+                "TCP": {
+                  "443": { "HTTPS": true },
+                  "8443": { "HTTPS": true },
+                  "9997": { "HTTPS": true },
+                  "8554": { "TCPForward": "media:8554" },
+                  "1935": { "TCPForward": "media:1935" }
+                },
+                "Web": {
+                  "$${TS_CERT_DOMAIN}:443": { "Handlers": { "/": { "Proxy": "http://api:5000" } } },
+                  "$${TS_CERT_DOMAIN}:8443": { "Handlers": { "/": { "Proxy": "http://tiles:5002" } } },
+                  "$${TS_CERT_DOMAIN}:9997": { "Handlers": { "/": { "Proxy": "http://media:9997" } } }
+                }
+              }
+              EOF
+              exec /usr/local/bin/containerboot
+
+volumes:
+    cloudtak-postgis:
+    cloudtak-store:
+    tailscale-state:
